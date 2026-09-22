@@ -1,4 +1,56 @@
-__pycache__/
-*.pyc
+# Environment and Secrets
 .env
+.env.*
+!.env.example
+
+# Runtime & Generated transcripts
+qa_transcript.json
+*.log
+
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# C extensions
+*.so
+
+# Distribution / packaging
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# Virtual environments
+.env/
+.venv/
+env/
+venv/
+ENV/
+env.bak/
+venv.bak/
+
+# Editor & IDE configs
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Operating System Files
 .DS_Store
+Thumbs.db

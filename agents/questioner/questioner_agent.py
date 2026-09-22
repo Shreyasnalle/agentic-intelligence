@@ -1,5 +1,14 @@
+import os
+import sys
 import json
+from pathlib import Path
 from typing import List, Optional, Any
+
+# Ensure repository root is in sys.path
+REPO_ROOT = Path(__file__).resolve().parent.parent.parent
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
 from agents.questioner.schemas import QuestionOutput, FramedInteraction
 from agents.models import get_hf_llm
 
@@ -95,3 +104,9 @@ class QuestionerAgent:
             is_evaluation_complete=is_final,
             rationale="Baseline cognitive probe.",
         )
+
+
+if __name__ == "__main__":
+    agent = QuestionerAgent()
+    q = agent.generate_question(1, [])
+    print(f"Generated Question ({q.dimension_probed}): {q.question}")

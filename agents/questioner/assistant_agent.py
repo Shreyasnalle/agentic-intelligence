@@ -1,4 +1,13 @@
+import os
+import sys
+from pathlib import Path
 from typing import Optional, Any
+
+# Ensure repository root is in sys.path
+REPO_ROOT = Path(__file__).resolve().parent.parent.parent
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
 from agents.questioner.schemas import FramedInteraction
 from agents.models import get_hf_llm
 
@@ -62,3 +71,13 @@ class AssistantAgent:
             dimension_probed=dimension_probed,
             key_observations="Direct framing of user response without external LLM normalization.",
         )
+
+
+if __name__ == "__main__":
+    agent = AssistantAgent()
+    interaction = agent.frame_interaction(
+        turn_index=1,
+        question="What is 2+2?",
+        raw_user_response="It is 4 because 2 added to 2 equals 4.",
+    )
+    print(f"Framed Answer: {interaction.framed_response}")
