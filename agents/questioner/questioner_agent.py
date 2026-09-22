@@ -1,204 +1,161 @@
-import json
-from typing import Dict, Optional, Any
+import re
+from typing import Dict, List, Optional, Any
+from pydantic import BaseModel, Field
 
-from langchain_core.prompts import PromptTemplate
+from langchain_core.messages import AIMessage, HumanMessage, BaseMessage
+from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 from langchain_core.output_parsers import PydanticOutputParser
-from langchain_core.chat_history import InMemoryChatMessageHistory
-from langchain_core.messages import AIMessage
 
-from agents.models import get_hf_llm
-from agents.questioner.schemas import QuestionOutput
+try:
+    from agents.questioner.models import get_hf_llm
+except ModuleNotFoundError:
+    from models import get_hf_llm
 
+# Pydantic schemas for structured question output and session results
+class QuestionMessage(BaseModel):
+    ai: str = Field(description="The cognitive evaluation question asked by the counselor to the user.")
+
+class QASessionResult(BaseModel):
+    total_turns: int = Field(description="Total number of completed Q&A interactions across the interview session.")
+    qa_pairs: Dict[str, str] = Field(description="Final mapping where each key is the exact evaluation question asked and value is the user's verbatim response.")
 
 class QuestionerAgent:
-    """
-    Questioner (Counselor) Agent built strictly with standard LangChain components:
-    - Model: Loaded from agents.models (get_hf_llm)
-    - Structured Output: PydanticOutputParser(pydantic_object=QuestionOutput)
-    - Chain: prompt | llm | parser
-    - Memory: InMemoryChatMessageHistory
-    """
-
-    def __init__(self, llm: Optional[Any] = None, max_turns: int = 10):
+    # Initializes QuestionerAgent, LLM, chains, memory, and output parser
+    def __init__(self, llm: Optional[Any] = None, max_turns: int = 5):
         self.llm = llm or get_hf_llm()
         self.max_turns = max_turns
-        self.current_turn = 1
+        self.current_turn = 0
         self.current_question: Optional[str] = None
-
-        # Key-value history mapping: { question: user_response }
         self.qa_history: Dict[str, str] = {}
+        self.memory: List[BaseMessage] = []  # plain list recommended by LangChain docs
+        self.parser = PydanticOutputParser(pydantic_object=QuestionMessage)
+        self._build_prompts()
 
-        # LangChain Memory Component
-        self.memory = InMemoryChatMessageHistory()
+    # Strips think tags, code fences, and extracts first valid JSON object from LLM output
+    def _clean_output(self, text: str) -> str:
+        text = re.sub(r"<think>.*?</think>", "", text, flags=re.DOTALL)
+        text = re.sub(r"```(?:json)?\s*", "", text)
+        text = text.strip()
+        # Extract first JSON object if model wraps output in extra text
+        match = re.search(r"\{[^{}]*\}", text, flags=re.DOTALL)
+        if match:
+            return match.group(0)
+        return text
 
-        # LangChain Pydantic Output Parser
-        self.parser = PydanticOutputParser(pydantic_object=QuestionOutput)
-
-        # Build chains: prompt | llm | parser
-        self._build_chains()
-
-    def _build_chains(self):
-        """
-        Builds standard LangChain pipelines: prompt | llm | parser
-        """
+    # Builds prompt templates and compiles LCEL chains with output parser
+    def _build_prompts(self):
         format_instructions = self.parser.get_format_instructions()
 
-        # 1. Initial Question Prompt & Chain (Turn 1)
-        self.initial_prompt = PromptTemplate(
-            template=(
-                "You are an expert Counselor Agent evaluating human cognitive, analytical, and problem-solving abilities.\n"
-                "This is Turn 1 of {max_turns}.\n\n"
-                "Task:\n"
-                "Generate an engaging, calibrated opening question to evaluate one of the key cognitive dimensions:\n"
-                "- Deductive reasoning\n"
-                "- Pattern recognition\n"
-                "- Working memory and sequential reasoning\n"
-                "- Critical premise validation\n\n"
-                "Ensure the question is thought-provoking, specific, and clear.\n\n"
+        self.initial_chat_prompt = ChatPromptTemplate.from_messages([
+            (
+                "system",
+                "You are an expert Counselor Agent evaluating human cognitive and reasoning capabilities.\n"
+                "This is Turn 1 of {max_turns}.\n"
+                "Task: Generate an engaging, calibrated opening question testing deductive logic, pattern recognition, working memory, or premise validation.\n\n"
                 "{format_instructions}\n"
             ),
-            input_variables=["max_turns"],
-            partial_variables={"format_instructions": format_instructions},
-        )
+            (
+                "human",
+                "Please generate the opening cognitive evaluation question.",
+            ),
+        ]).partial(format_instructions=format_instructions)
 
-        # 2. Credibility Check & Reframing Prompt & Chain (Turns 2 to 10)
-        self.reframe_prompt = PromptTemplate(
-            template=(
-                "You are the senior Counselor Agent in a cognitive evaluation interview.\n"
-                "Current Turn: {turn_index} of {max_turns}.\n\n"
-                "Conversation Memory Transcript:\n"
-                "{memory_transcript}\n\n"
-                "Accumulated Q&A Key-Value History:\n"
-                "{qa_history_json}\n\n"
-                "Assistant Agent's Proposed Next Question:\n"
-                "\"{proposed_question}\" (Proposed Dimension: {proposed_dimension})\n\n"
-                "Your Tasks:\n"
-                "1. Credibility Check: Evaluate the assistant's proposed question against the conversation memory. Ensure it is logically sound, non-repetitive, and relevant based on prior answers.\n"
-                "2. Reframe & Sharpen: Reframe and polish the question into a high-standard evaluation challenge.\n"
-                "3. Set 'is_evaluation_complete' to True if turn_index >= {max_turns}, else False.\n\n"
+        self.adaptive_chat_prompt = ChatPromptTemplate.from_messages([
+            (
+                "system",
+                "You are an expert Counselor Agent conducting an adaptive cognitive interview.\n"
+                "Current Turn: {turn_index} of {max_turns}.\n"
+                "Review the previous questions and answers in conversation memory.\n"
+                "Formulate the next evaluation question dynamically adapted to the user's prior reasoning:\n"
+                "- Probe depth, test boundary conditions, or pivot to another cognitive dimension.\n"
+                "- Do not repeat previous questions.\n\n"
                 "{format_instructions}\n"
             ),
-            input_variables=[
-                "turn_index",
-                "max_turns",
-                "memory_transcript",
-                "qa_history_json",
-                "proposed_question",
-                "proposed_dimension",
-            ],
-            partial_variables={"format_instructions": format_instructions},
-        )
+            MessagesPlaceholder(variable_name="history"),
+            (
+                "human",
+                "Based on my previous answers in the dialogue history, what is your next evaluation question?",
+            ),
+        ]).partial(format_instructions=format_instructions)
 
         if self.llm is not None:
-            # Standard LangChain LCEL pipeline: prompt | llm | parser
-            self.initial_chain = self.initial_prompt | self.llm | self.parser
-            self.reframe_chain = self.reframe_prompt | self.llm | self.parser
+            self.initial_chain = self.initial_chat_prompt | self.llm
+            self.adaptive_chain = self.adaptive_chat_prompt | self.llm
         else:
             self.initial_chain = None
-            self.reframe_chain = None
+            self.adaptive_chain = None
 
-    def get_memory_transcript(self) -> str:
-        """
-        Extracts dialogue transcript from the LangChain Memory component.
-        """
-        lines = []
-        for msg in self.memory.messages:
-            prefix = "Counselor (AI):" if isinstance(msg, AIMessage) else "User:"
-            lines.append(f"{prefix} {msg.content}")
-        return "\n".join(lines) if lines else "No prior conversation in memory."
+    # Generates the opening question once for Turn 1
+    def generate_initial_question(self) -> Dict[str, str]:
+        if self.current_turn != 0:
+            raise RuntimeError("generate_initial_question can only be called once for the first question.")
 
-    def generate_initial_question(self) -> QuestionOutput:
-        """
-        Generates opening Question 1 using: prompt | llm | parser
-        """
         if self.initial_chain is None:
-            raise RuntimeError(
-                "[QuestionerAgent] Model/Chain is not initialized. Please ensure HUGGINGFACEHUB_API_TOKEN is set."
-            )
+            raise RuntimeError("Model or chain is not initialized.")
 
-        output: QuestionOutput = self.initial_chain.invoke({"max_turns": self.max_turns})
-        output.turn_index = 1
-        output.is_evaluation_complete = (1 >= self.max_turns)
+        for attempt in range(3):
+            raw = self.initial_chain.invoke({"max_turns": self.max_turns})
+            cleaned = self._clean_output(raw.content)
+            if cleaned:
+                try:
+                    result: QuestionMessage = self.parser.parse(cleaned)
+                    question_text = result.ai.strip()
+                    self.current_turn = 1
+                    self.current_question = question_text
+                    self.memory.append(AIMessage(content=question_text))
+                    return {"ai": question_text}
+                except Exception:
+                    continue
+        raise RuntimeError("Failed to generate initial question after 3 attempts.")
 
-        self.current_turn = 1
-        self.current_question = output.question
-        self.memory.add_ai_message(output.question)
-
-        return output
-
-    def process_user_response(
+    # Generates adaptive follow-up questions for the remaining 9 turns based on user answers and memory
+    def generate_next_question(
         self,
-        user_answer: str,
-        question: Optional[str] = None,
+        interaction: Dict[str, str],
+        memory: Optional[List[BaseMessage]] = None,
     ) -> Dict[str, str]:
-        """
-        Takes user's answer, pairs it with the question into { question: user_answer },
-        records it in memory, and returns the key-value dictionary to pass to assistant_agent.
-        """
-        active_question = question or self.current_question
-        if not active_question:
-            raise ValueError("[QuestionerAgent] No active question found to pair with user response.")
+        if self.current_turn < 1:
+            raise RuntimeError("Initial question must be generated before generate_next_question can be called.")
 
-        self.memory.add_user_message(user_answer)
-        self.qa_history[active_question] = user_answer
+        if self.current_turn >= self.max_turns:
+            raise RuntimeError(f"Question limit reached: generate_next_question cannot be called more than {self.max_turns - 1} times.")
 
-        return {active_question: user_answer}
+        if self.adaptive_chain is None:
+            raise RuntimeError("Model or chain is not initialized.")
 
-    def recheck_and_reframe_question(
-        self,
-        assistant_question: str,
-        assistant_dimension: Optional[str] = "general",
-        turn_index: Optional[int] = None,
-    ) -> QuestionOutput:
-        """
-        Receives candidate question from assistant_agent, checks credibility against
-        memory, reframes it, and outputs the next question using: prompt | llm | parser
-        """
-        if self.reframe_chain is None:
-            raise RuntimeError(
-                "[QuestionerAgent] Model/Chain is not initialized. Please ensure HUGGINGFACEHUB_API_TOKEN is set."
-            )
+        active_memory = memory if memory is not None else self.memory
+        ai_q = interaction.get("ai") or self.current_question
+        user_a = interaction.get("user", "")
 
-        next_turn = turn_index if turn_index is not None else (self.current_turn + 1)
-        is_final = next_turn >= self.max_turns
+        if ai_q:
+            self.qa_history[ai_q] = user_a
 
-        payload = {
-            "turn_index": next_turn,
-            "max_turns": self.max_turns,
-            "memory_transcript": self.get_memory_transcript(),
-            "qa_history_json": json.dumps(self.qa_history, indent=2),
-            "proposed_question": assistant_question,
-            "proposed_dimension": assistant_dimension or "general",
-        }
+        has_ai_msg = any(isinstance(m, AIMessage) and m.content == ai_q for m in active_memory)
+        if not has_ai_msg and ai_q:
+            active_memory.append(AIMessage(content=ai_q))
+        active_memory.append(HumanMessage(content=user_a))
 
-        output: QuestionOutput = self.reframe_chain.invoke(payload)
-        output.turn_index = next_turn
-        output.is_evaluation_complete = is_final
-
+        next_turn = self.current_turn + 1
         self.current_turn = next_turn
-        self.current_question = output.question
-        self.memory.add_ai_message(output.question)
 
-        return output
+        for attempt in range(3):
+            raw = self.adaptive_chain.invoke({
+                "turn_index": next_turn,
+                "max_turns": self.max_turns,
+                "history": active_memory,
+            })
+            cleaned = self._clean_output(raw.content)
+            if cleaned:
+                try:
+                    result: QuestionMessage = self.parser.parse(cleaned)
+                    next_question_text = result.ai.strip()
+                    self.current_question = next_question_text
+                    active_memory.append(AIMessage(content=next_question_text))
+                    return {"ai": next_question_text}
+                except Exception:
+                    continue
+        raise RuntimeError("Failed to generate next question after 3 attempts.")
 
-    def generate_question(
-        self,
-        turn_index: int,
-        qa_history: Optional[Dict[str, str]] = None,
-        proposed_question: Optional[str] = None,
-        proposed_dimension: Optional[str] = None,
-    ) -> QuestionOutput:
-        """
-        Unified dispatch method across all 10 turns.
-        """
-        if qa_history:
-            self.qa_history.update(qa_history)
-
-        if turn_index == 1 or not proposed_question:
-            return self.generate_initial_question()
-        else:
-            return self.recheck_and_reframe_question(
-                assistant_question=proposed_question,
-                assistant_dimension=proposed_dimension,
-                turn_index=turn_index,
-            )
+    # Returns the accumulated dictionary of questions mapped to user responses
+    def get_qa_history(self) -> Dict[str, str]:
+        return self.qa_history
