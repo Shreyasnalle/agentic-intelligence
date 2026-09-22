@@ -8,7 +8,7 @@ def get_hf_llm(
     repo_id: Optional[str] = None,
     api_token: Optional[str] = None,
     temperature: float = 0.6,
-    max_new_tokens: int = 1024,
+    max_new_tokens: int = 2048,
 ) -> Optional[Any]:
     token = api_token or os.getenv("HUGGINGFACEHUB_API_TOKEN")
     model_id = repo_id or os.getenv("HF_MODEL_NAME") or "deepseek-ai/DeepSeek-R1"
