@@ -1,5 +1,5 @@
 import json
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Optional, Union
 from pydantic import BaseModel, Field
 
 from langchain_core.output_parsers import PydanticOutputParser
@@ -16,9 +16,9 @@ except ModuleNotFoundError:
 
 # Output schema for reasoning evaluation
 class ReasoningAnalysisOutput(BaseModel):
-    qna: Dict[str, Any] = Field(
+    qna: Union[Dict[str, Any], list] = Field(
         default_factory=dict,
-        description="The reasoning question-and-answer pairs analyzed as a dictionary.",
+        description="The reasoning question-and-answer pairs analyzed as a JSON object dictionary. Format: {\"question\": \"answer\"}.",
     )
     reasoning_result: str = Field(
         description="A comprehensive evaluation text string covering logical reasoning quality, problem-solving approach, error patterns, and overall assessment.",
@@ -37,7 +37,7 @@ class ReasoningAgent:
                 "You are an expert Reasoning Analyst evaluating human cognitive and logical capabilities.\n"
                 "Analyze the following assigned reasoning question-and-answer pairs to evaluate logical reasoning quality, problem-solving approach, error patterns, and overall assessment.\n\n"
                 "Assigned Reasoning Tasks:\n{tasks}\n\n"
-                "Return ONLY a valid JSON object without any markdown headers, conversational text, or explanations outside the JSON.\n\n"
+                "Return ONLY a valid JSON object without any markdown headers, conversational text, or explanations outside the JSON. Ensure 'qna' is a JSON object dictionary, not a list.\n\n"
                 "{format_instructions}\n"
             ),
             input_variables=["tasks"],

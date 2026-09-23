@@ -1,5 +1,5 @@
 import json
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Optional, Union
 from pydantic import BaseModel, Field
 
 from langchain_core.output_parsers import PydanticOutputParser
@@ -16,7 +16,7 @@ except ModuleNotFoundError:
 
 # Output schema for cognitive evaluation
 class CognitiveAnalysisOutput(BaseModel):
-    qna: Dict[str, Any] = Field(
+    qna: Union[Dict[str, Any], list] = Field(
         default_factory=dict,
         description="The cognitive question-and-answer pairs analyzed as a JSON object dictionary. Format: {\"question\": \"answer\"}.",
     )

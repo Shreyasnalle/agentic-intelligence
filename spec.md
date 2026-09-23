@@ -286,3 +286,370 @@ The Agent Orchestrator acts as the centralized coordinator that partitions the Q
     - *Purpose*: Single consolidated function running orchestrator operations in orderly sequence: loading input, instantiating `OrchestratorAgent`, invoking `orchestrate()`, saving partitions to `routed_tasks.json`, and returning the final state.
     - *Where called*: When running `python ao_pipeline.py` or imported as the orchestration stage in higher-level pipelines.
 
+---
+
+## REASONING AGENT
+
+### 1. Execution Workflow
+The Reasoning Agent evaluates the user's deductive/inductive logic, problem-solving strategies, critical thinking, and premise validation from the tasks routed to it by the Agent Orchestrator:
+
+1. **Pipeline Invocation (`run_reasoning_pipeline` / `run` in `reasoning_pipeline.py`)**:
+   - `run(source="routed_tasks.json", output_filepath="agents_analysis.json")` is called.
+   - Accepts either a file path to `routed_tasks.json` or a pre-loaded dictionary of routed tasks.
+
+2. **Task Ingestion (`load_reasoning_input`)**:
+   - Reads `routed_tasks.json` and extracts the subset of Q&A pairs allocated under `"reasoning_agent"`.
+   - Returns the extracted tasks as a clean dictionary `{ question: answer }`.
+
+3. **Reasoning Agent Instantiation**:
+   - `ReasoningAgent(llm=...)` is initialized:
+     - Configures the output parser `PydanticOutputParser(pydantic_object=ReasoningAnalysisOutput)`.
+     - Injects parser format instructions into `PromptTemplate(input_variables=["tasks"])`.
+     - Compiles the atomic LCEL runnable chain: `self.prompt | self.llm | self.parser`.
+
+4. **Reasoning Evaluation (`analyze_reasoning`)**:
+   - `reasoning_agent.analyze_reasoning(tasks)` is invoked with the extracted task dictionary.
+   - Formats tasks as JSON and executes the LCEL chain: `self.chain.invoke({"tasks": json.dumps(tasks, indent=2)})`.
+   - The LLM evaluates logical reasoning quality, problem-solving approach, error patterns, and overall reasoning assessment.
+   - Output parser returns validated `ReasoningAnalysisOutput`.
+   - Method returns a structured dictionary: `{"qna": parsed.qna, "reasoning_result": parsed.reasoning_result}`.
+
+5. **Persistence & Handoff (`save_agents_analysis` / `create_agents_analysis_json`)**:
+   - Checks if `agents_analysis.json` already exists; if so, reads and preserves existing data.
+   - Updates `output["reasoning_agent"] = analysis_data`.
+   - Writes the updated JSON object to `agents_analysis.json`.
+   - Returns the analysis result.
+
+```
+[run() entry] ──► Read "routed_tasks.json"
+       │
+       ▼
+[load_reasoning_input()] ──► Extract "reasoning_agent" dict
+       │
+       ▼
+[ReasoningAgent.analyze_reasoning(tasks)]
+       │
+       ▼
+┌────────────────────────────────────────────────────────┐
+│ LCEL Chain (ReasoningAnalysisOutput)                   │
+│                                                        │
+│  tasks (JSON) ──► PromptTemplate ──► LLM ──► Parser    │
+│                                                        │
+│  Returns:                                              │
+│    - qna: Dict[str, Any]                               │
+│    - reasoning_result: str                             │
+└─────────────────────────┬──────────────────────────────┘
+                          │
+                          ▼
+[save_agents_analysis()] ──► Update output["reasoning_agent"]
+                          │
+                          ▼
+            Save to "agents_analysis.json"
+```
+
+---
+
+### 2. File & Component Breakdown (with LangChain Components)
+
+#### A. `reason_agent.py`
+**Purpose**: Houses the output schema, prompt compilation, and LCEL chain for logical reasoning evaluation.
+
+- **Classes & Schemas**:
+  - `ReasoningAnalysisOutput(BaseModel)`:
+    - *Purpose*: Pydantic schema enforcing structured output containing `qna: Dict[str, Any]` and `reasoning_result: str`.
+    - *LangChain Component*: **`PydanticOutputParser`**
+      - *Where used*: `self.parser = PydanticOutputParser(pydantic_object=ReasoningAnalysisOutput)`, chained into `self.chain`.
+      - *Why used*: Guarantees that the LLM returns strict, valid JSON conforming to `{ "qna": {...}, "reasoning_result": "..." }`.
+
+- **Methods**:
+  - `__init__(llm=None)`:
+    - *Purpose*: Configures LLM, parser, binds format instructions, and builds the LCEL chain.
+    - *Where called*: By `run_reasoning_pipeline()` in `reasoning_pipeline.py`.
+    - *LangChain Components Used*:
+      - **`PromptTemplate`** (`langchain_core.prompts`):
+        - *Where used*: `self.prompt = PromptTemplate(...)` with `input_variables=["tasks"]` and `format_instructions`.
+        - *Why used*: Injects the assigned reasoning tasks and Pydantic format instructions into an explicit evaluation prompt.
+      - **LCEL Pipe Operator (`|`)**:
+        - *Where used*: `self.chain = self.prompt | self.llm | self.parser`.
+        - *Why used*: Connects prompt formatting, model inference, and output parsing into an atomic executable runnable pipeline.
+
+  - `analyze_reasoning(tasks: Dict[str, str]) -> Dict[str, Any]`:
+    - *Purpose*: Invokes the LCEL chain on the assigned tasks and returns `{ "qna": parsed.qna, "reasoning_result": parsed.reasoning_result }`.
+    - *Where called*: In `reasoning_pipeline.py`.
+
+---
+
+#### B. `reasoning_pipeline.py`
+**Purpose**: Pipeline execution entry point coordinating task ingestion from `routed_tasks.json`, reasoning analysis, and persistence to `agents_analysis.json`.
+
+- **Functions**:
+  - `load_reasoning_input(source="routed_tasks.json") -> Dict[str, str]`:
+    - *Purpose*: Deserializes `routed_tasks.json` and extracts the dictionary of tasks allocated to `"reasoning_agent"`.
+    - *Where called*: By `run_reasoning_pipeline()`.
+  - `save_agents_analysis(analysis_data, output_filepath="agents_analysis.json") -> None` (aliased as `create_agents_analysis_json`):
+    - *Purpose*: Persists the analysis to `agents_analysis.json` under `"reasoning_agent"` while safely preserving evaluations from other agents.
+    - *Where called*: By `run_reasoning_pipeline()`.
+  - `run_reasoning_pipeline(source="routed_tasks.json", output_filepath="agents_analysis.json") -> Dict[str, Any]` (aliased as `run`):
+    - *Purpose*: Orchestrates the complete reasoning workflow in orderly sequence: loading input tasks, running `ReasoningAgent`, saving to `agents_analysis.json`, and returning the analysis dictionary.
+    - *Where called*: When running `python reasoning_pipeline.py` or imported by orchestrator workflows.
+
+---
+
+## COGNITIVE AGENT
+
+### 1. Execution Workflow
+The Cognitive Agent evaluates the user's pattern recognition ability, numerical/spatial sequence reasoning, working memory retention & tracking, and attention to detail from the tasks routed to it by the Agent Orchestrator:
+
+1. **Pipeline Invocation (`run_cognitive_pipeline` / `run` in `cognitive_pipeline.py`)**:
+   - `run(source="routed_tasks.json", output_filepath="agents_analysis.json")` is called.
+   - Accepts either a file path to `routed_tasks.json` or a pre-loaded dictionary of routed tasks.
+
+2. **Task Ingestion (`load_cognitive_input`)**:
+   - Reads `routed_tasks.json` and extracts the subset of Q&A pairs allocated under `"cognitive_agent"`.
+   - Returns the extracted tasks as a clean dictionary `{ question: answer }`.
+
+3. **Cognitive Agent Instantiation**:
+   - `CognitiveAgent(llm=...)` is initialized:
+     - Configures the output parser `PydanticOutputParser(pydantic_object=CognitiveAnalysisOutput)`.
+     - Injects parser format instructions into `PromptTemplate(input_variables=["tasks"])`.
+     - Compiles the atomic LCEL runnable chain: `self.prompt | self.llm | self.parser`.
+
+4. **Cognitive Evaluation (`analyze_cognitive`)**:
+   - `cognitive_agent.analyze_cognitive(tasks)` is invoked with the extracted task dictionary.
+   - Formats tasks as JSON and executes the LCEL chain: `self.chain.invoke({"tasks": json.dumps(tasks, indent=2)})`.
+   - The LLM evaluates pattern recognition ability, working memory retention and tracking, attention to detail, and overall cognitive assessment.
+   - Output parser returns validated `CognitiveAnalysisOutput`.
+   - Method returns a structured dictionary: `{"qna": parsed.qna, "cognitive_result": parsed.cognitive_result}`.
+
+5. **Persistence & Handoff (`save_agents_analysis` / `create_agents_analysis_json`)**:
+   - Checks if `agents_analysis.json` already exists; if so, reads and preserves existing data (including `reasoning_agent`).
+   - Updates `output["cognitive_agent"] = analysis_data`.
+   - Writes the updated JSON object to `agents_analysis.json`.
+   - Returns the analysis result.
+
+```
+[run() entry] ──► Read "routed_tasks.json"
+       │
+       ▼
+[load_cognitive_input()] ──► Extract "cognitive_agent" dict
+       │
+       ▼
+[CognitiveAgent.analyze_cognitive(tasks)]
+       │
+       ▼
+┌────────────────────────────────────────────────────────┐
+│ LCEL Chain (CognitiveAnalysisOutput)                   │
+│                                                        │
+│  tasks (JSON) ──► PromptTemplate ──► LLM ──► Parser    │
+│                                                        │
+│  Returns:                                              │
+│    - qna: Dict[str, Any]                               │
+│    - cognitive_result: str                             │
+└─────────────────────────┬──────────────────────────────┘
+                          │
+                          ▼
+[save_agents_analysis()] ──► Update output["cognitive_agent"]
+                          │
+                          ▼
+            Save to "agents_analysis.json"
+```
+
+---
+
+### 2. File & Component Breakdown (with LangChain Components)
+
+#### A. `cognitive_agent.py`
+**Purpose**: Houses the output schema, prompt compilation, and LCEL chain for cognitive capability evaluation.
+
+- **Classes & Schemas**:
+  - `CognitiveAnalysisOutput(BaseModel)`:
+    - *Purpose*: Pydantic schema enforcing structured output containing `qna: Dict[str, Any]` and `cognitive_result: str`.
+    - *LangChain Component*: **`PydanticOutputParser`**
+      - *Where used*: `self.parser = PydanticOutputParser(pydantic_object=CognitiveAnalysisOutput)`, chained into `self.chain`.
+      - *Why used*: Guarantees that the LLM returns strict, valid JSON conforming to `{ "qna": {...}, "cognitive_result": "..." }`.
+
+- **Methods**:
+  - `__init__(llm=None)`:
+    - *Purpose*: Configures LLM, parser, binds format instructions, and builds the LCEL chain.
+    - *Where called*: By `run_cognitive_pipeline()` in `cognitive_pipeline.py`.
+    - *LangChain Components Used*:
+      - **`PromptTemplate`** (`langchain_core.prompts`):
+        - *Where used*: `self.prompt = PromptTemplate(...)` with `input_variables=["tasks"]` and `format_instructions`.
+        - *Why used*: Injects the assigned cognitive tasks and Pydantic format instructions into an explicit evaluation prompt.
+      - **LCEL Pipe Operator (`|`)**:
+        - *Where used*: `self.chain = self.prompt | self.llm | self.parser`.
+        - *Why used*: Connects prompt formatting, model inference, and output parsing into an atomic executable runnable pipeline.
+
+  - `analyze_cognitive(tasks: Dict[str, str]) -> Dict[str, Any]`:
+    - *Purpose*: Invokes the LCEL chain on the assigned tasks and returns `{ "qna": parsed.qna, "cognitive_result": parsed.cognitive_result }`.
+    - *Where called*: In `cognitive_pipeline.py`.
+
+---
+
+#### B. `cognitive_pipeline.py`
+**Purpose**: Pipeline execution entry point coordinating task ingestion from `routed_tasks.json`, cognitive analysis, and persistence to `agents_analysis.json`.
+
+- **Functions**:
+  - `load_cognitive_input(source="routed_tasks.json") -> Dict[str, str]`:
+    - *Purpose*: Deserializes `routed_tasks.json` and extracts the dictionary of tasks allocated to `"cognitive_agent"`.
+    - *Where called*: By `run_cognitive_pipeline()`.
+  - `save_agents_analysis(analysis_data, output_filepath="agents_analysis.json") -> None` (aliased as `create_agents_analysis_json`):
+    - *Purpose*: Persists the analysis to `agents_analysis.json` under `"cognitive_agent"` while safely preserving evaluations from other agents.
+    - *Where called*: By `run_cognitive_pipeline()`.
+  - `run_cognitive_pipeline(source="routed_tasks.json", output_filepath="agents_analysis.json") -> Dict[str, Any]` (aliased as `run`):
+    - *Purpose*: Orchestrates the complete cognitive workflow in orderly sequence: loading input tasks, running `CognitiveAgent`, saving to `agents_analysis.json`, and returning the analysis dictionary.
+    - *Where called*: When running `python cognitive_pipeline.py` or imported by orchestrator workflows.
+
+---
+
+## FINAL REPORT AGENT
+
+### 1. Execution Workflow
+The Final Report Agent synthesizes the evaluations from both specialist agents (`reasoning_agent` and `cognitive_agent`) into a unified, comprehensive cognitive profile. The execution flow in `report_pipeline.py` executes in a strictly orderly sequence:
+
+1. **Pipeline Entry (`run_report_pipeline` / `run` in `report_pipeline.py`)**:
+   - `run(source="agents_analysis.json", output_filepath="final_report.md")` is invoked.
+   - Accepts either a string path to `agents_analysis.json` or an in-memory dictionary.
+
+2. **Step 1: Ingestion (`load_analysis_input`)**:
+   - `analysis_data = load_analysis_input(source)`
+   - Deserializes and returns the complete specialist analyses dictionary containing evaluations from both `reasoning_agent` and `cognitive_agent`.
+
+3. **Step 2: Agent Instantiation (`ReportAgent`)**:
+   - `report_agent = ReportAgent()`
+   - Initializes the LLM (`ChatHuggingFace`), the output parser (`StrOutputParser`), and formats `PromptTemplate(input_variables=["analysis_json"])`.
+   - Compiles the atomic LCEL chain: `self.chain = self.prompt | self.llm | self.parser`.
+
+4. **Step 3: Synthesis & Report Generation (`generate_report`)**:
+   - `report = report_agent.generate_report(analysis_data)`
+   - Serializes `analysis_data` into formatted JSON: `json.dumps(analysis_data, indent=2)`.
+   - Invokes `self.chain.invoke({"analysis_json": ...})`.
+   - The LLM synthesizes disparate cognitive dimensions, balances strengths against blind spots, and produces a structured continuous Markdown report string parsed directly by `StrOutputParser`.
+
+5. **Step 4: Persistence (`save_report`)**:
+   - `save_report(report, output_filepath)`
+   - Writes the formatted report text to `final_report.md`.
+
+6. **Step 5: Return & Output Presentation**:
+   - `return report` returns the string to the caller.
+   - When executed as a script (`if __name__ == "__main__":`), `result = run()` executes and `print(result)` outputs the final report to stdout.
+
+```
+[run() entry] ──► source = "agents_analysis.json"
+       │
+       ▼
+ 1. analysis_data = load_analysis_input(source)
+       │
+       ▼
+ 2. report_agent = ReportAgent()
+       │
+       ▼
+ 3. report = report_agent.generate_report(analysis_data)
+       │
+       ├─► Serialization: json.dumps(analysis_data, indent=2)
+       ├─► LCEL Chain: prompt | llm | parser (StrOutputParser)
+       └─► Return: raw Markdown report string
+       │
+       ▼
+ 4. save_report(report, output_filepath="final_report.md")
+       │
+       ▼
+ 5. return report ──► Printed to stdout via if __name__ == "__main__"
+```
+
+---
+
+### 2. File & Component Breakdown (with LangChain Components)
+
+#### A. `report_agent.py`
+**Purpose**: Houses the synthesis prompt and LCEL chain producing the unified user cognitive profile.
+
+- **Classes**:
+  - `ReportAgent`:
+    - `__init__(llm=None)`:
+      - *Purpose*: Configures LLM, prompt template, output parser, and compiles the LCEL chain.
+      - *Where called*: By `run_report_pipeline()` in `report_pipeline.py`.
+      - *LangChain Components Used*:
+        - **`StrOutputParser`** (`langchain_core.output_parsers`):
+          - *Where used*: `self.parser = StrOutputParser()`, chained into `self.chain`.
+          - *Why used*: Streams the LLM's formatted Markdown text directly as a plain string without Pydantic schema validation overhead.
+        - **`PromptTemplate`** (`langchain_core.prompts`):
+          - *Where used*: `self.prompt = PromptTemplate(...)` with `input_variables=["analysis_json"]`.
+          - *Why used*: Structures synthesis guidelines covering persona, strengths, blind spots, and development recommendations.
+        - **LCEL Pipe Operator (`|`)**:
+          - *Where used*: `self.chain = self.prompt | self.llm | self.parser`.
+          - *Why used*: Creates an atomic runnable executing prompt formatting, model inference, and string parsing in a single step.
+    - `generate_report(analysis_data: Dict[str, Any]) -> str`:
+      - *Purpose*: Invokes the LCEL chain with serialized analysis data and returns the final report string.
+      - *Where called*: In `report_pipeline.py`.
+
+---
+
+#### B. `report_pipeline.py`
+**Purpose**: Pipeline execution entry point coordinating analysis loading, report generation, and Markdown file persistence.
+
+- **Functions**:
+  - `load_analysis_input(source="agents_analysis.json") -> Dict[str, Any]`:
+    - *Purpose*: Reads and deserializes specialist evaluations from `agents_analysis.json` or returns the passed dictionary.
+    - *Where called*: Step 1 in `run_report_pipeline()`.
+  - `save_report(report_text: str, output_filepath="final_report.md") -> None`:
+    - *Purpose*: Writes the generated report text directly to `final_report.md`.
+    - *Where called*: Step 4 in `run_report_pipeline()`.
+  - `run_report_pipeline(source="agents_analysis.json", output_filepath="final_report.md") -> str` (aliased as `run`):
+    - *Purpose*: Main execution entry point coordinating analysis loading, report generation, file persistence, and return.
+    - *Where called*: When running `python report_pipeline.py` or imported as the final stage of the multi-agent pipeline.
+  - `if __name__ == "__main__":`:
+    - *Purpose*: Runs `result = run()` and prints the full Markdown report to stdout.
+
+---
+
+# COMPLETE END-TO-END SYSTEM WORKFLOW
+
+The multi-agent system operates across four coordinated stages through standardized file bridges:
+
+```
+                      [User Turn-Based Interaction]
+                                    │
+                                    ▼
+                     ┌─────────────────────────────┐
+                     │      QUESTIONER AGENT       │
+                     │  (5-turn dynamic dialogue)  │
+                     └──────────────┬──────────────┘
+                                    │ writes
+                                    ▼
+                          qa_transcript.json
+                                    │
+                                    ▼ reads
+                     ┌─────────────────────────────┐
+                     │     AGENT ORCHESTRATOR      │
+                     │   (LangGraph partitioner)   │
+                     └──────────────┬──────────────┘
+                                    │ writes
+                                    ▼
+                           routed_tasks.json
+                                    │
+                  ┌─────────────────┴─────────────────┐
+                  │ reads                             │ reads
+                  ▼                                   ▼
+   ┌─────────────────────────────┐     ┌─────────────────────────────┐
+   │       REASONING AGENT       │     │       COGNITIVE AGENT       │
+   │  (Deductive & Logic Rubric) │     │ (Pattern & Attention Rubric)│
+   └──────────────┬──────────────┘     └──────────────┬──────────────┘
+                  │ updates                           │ updates
+                  └─────────────────┬─────────────────┘
+                                    │ writes
+                                    ▼
+                          agents_analysis.json
+                                    │
+                                    ▼ reads
+                     ┌─────────────────────────────┐
+                     │     FINAL REPORT AGENT      │
+                     │  (Synthesis & Persona LCEL) │
+                     └──────────────┬──────────────┘
+                                    │ writes
+                                    ▼
+                           final_report.md
+```
+
+
+
