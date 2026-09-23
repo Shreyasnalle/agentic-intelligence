@@ -1,0 +1,8 @@
+{
+  "reasoning_agent": {
+    "A bat and a baseball ball cost $1.10 in total. The bat costs $1.00 more than the ball. How much does the ball cost, and what is your step-by-step reasoning?": "The ball costs 5 cents. If the bat is $1.05 and the ball is $0.05, the total is $1.10 and the bat is $1.00 more.",
+    "Consider the sequence: 2, 6, 12, 20, 30, ... What is the next number in the sequence, and what mathematical pattern or formula governs it?": "The next number is 42. The difference sequence is 4, 6, 8, 10, so adding 12 gives 42.",
+    "Imagine five boxes in a row labeled 1 to 5. A coin starts in box 3. Every minute, the coin moves to an adjacent box (either left or right). Can the coin be in box 2 after exactly 4 minutes? Explain your reasoning.": "After 4 moves from box 3, the box number must have the same parity as 3 (odd) after odd steps or same parity after even steps: 3 is odd, after 4 steps it must end on an odd box (1, 3, or 5). Since 2 is even, it is impossible to be in box 2."
+  },
+  "cognitive_agent": {}
+}
