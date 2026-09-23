@@ -7,7 +7,13 @@ from langchain_core.prompts import PromptTemplate
 from langchain_core.output_parsers import PydanticOutputParser
 from langgraph.graph import StateGraph, START, END
 
-from agents.questioner.models import get_hf_llm
+try:
+    from agents.questioner.models import get_hf_llm
+except ModuleNotFoundError:
+    import sys
+    from pathlib import Path
+    sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
+    from agents.questioner.models import get_hf_llm
 
 
 # Output schema mapping questions to reasoning and cognitive specialist agents
@@ -62,43 +68,45 @@ class OrchestratorAgent:
         else:
             self.chain = None
 
-    # Classifies raw Q&A JSON into reasoning and cognitive agent task mappings
+    # Classifies raw Q&A JSON into specialist agents and computes task assignment summary
     def _classify_node(self, state: OrchestratorState) -> Dict[str, Any]:
         raw_qa = state.get("raw_qa", {})
         if not raw_qa:
-            return {"reasoning_agent": {}, "cognitive_agent": {}}
+            return {
+                "reasoning_agent": {},
+                "cognitive_agent": {},
+                "summary": {
+                    "total_tasks": 0,
+                    "reasoning_tasks_count": 0,
+                    "cognitive_tasks_count": 0,
+                },
+            }
 
         parsed: OrchestratorOutput = self.chain.invoke({
             "qa_json": json.dumps(raw_qa, indent=2),
         })
 
-        return {
-            "reasoning_agent": parsed.reasoning_agent,
-            "cognitive_agent": parsed.cognitive_agent,
-        }
-
-    # Tallies task distribution counts for the orchestration summary
-    def _route_node(self, state: OrchestratorState) -> Dict[str, Any]:
-        reasoning = state.get("reasoning_agent", {})
-        cognitive = state.get("cognitive_agent", {})
-
+        reasoning = parsed.reasoning_agent
+        cognitive = parsed.cognitive_agent
         summary = {
             "total_tasks": len(reasoning) + len(cognitive),
             "reasoning_tasks_count": len(reasoning),
             "cognitive_tasks_count": len(cognitive),
         }
 
-        return {"summary": summary}
+        return {
+            "reasoning_agent": reasoning,
+            "cognitive_agent": cognitive,
+            "summary": summary,
+        }
 
     # Constructs and compiles the LangGraph state machine
     def _build_graph(self):
         workflow = StateGraph(OrchestratorState)
         workflow.add_node("classify", self._classify_node)
-        workflow.add_node("route", self._route_node)
 
         workflow.add_edge(START, "classify")
-        workflow.add_edge("classify", "route")
-        workflow.add_edge("route", END)
+        workflow.add_edge("classify", END)
 
         self.graph = workflow.compile()
 

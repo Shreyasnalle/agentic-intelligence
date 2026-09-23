@@ -148,3 +148,141 @@ The Questioner Agent conducts an orderly, multi-turn cognitive interview between
     - *LangChain Component*: **`HumanMessage`**
       - *Where used*: Records the 5th (final) user answer into `questioner.memory` after the loop exits.
       - *Why used*: Ensures the complete 5-turn session is fully recorded in memory before exporting.
+
+---
+
+## AGENT ORCHESTRATION
+
+### 1. Execution Workflow
+The Agent Orchestrator acts as the centralized coordinator that partitions the Q&A transcript produced by the Questioner Agent into specialized subsets for downstream domain specialist agents (`reasoning_agent` and `cognitive_agent`):
+
+1. **Pipeline Invocation (`run` in `ao_pipeline.py`)**:
+   - `run(transcript_path="qa_transcript.json", output_filepath="routed_tasks.json")` is called.
+   - Accepts either a string file path or a pre-loaded dictionary of Q&A pairs.
+   - If a file path is provided, it deserializes the JSON transcript containing `{ question: user_answer }` pairs.
+
+2. **Orchestrator Agent Instantiation**:
+   - `OrchestratorAgent(llm=...)` is initialized:
+     - Configures the structured output parser `PydanticOutputParser(pydantic_object=OrchestratorOutput)`.
+     - Calls `_build_chain()` to compile the LCEL classification chain: `PromptTemplate | LLM | PydanticOutputParser`.
+     - Calls `_build_graph()` to construct and compile the LangGraph workflow: `START -> "classify" -> END`.
+
+3. **Orchestration Execution (`orchestrator.orchestrate(qa_data)`)**:
+   - `orchestrate(raw_qa)` invokes the compiled LangGraph workflow: `self.graph.invoke({"raw_qa": raw_qa})`.
+   - Execution begins at `START` and transitions directly to the `"classify"` node.
+
+4. **Node Execution (`_classify_node`)**:
+   - Extracts `raw_qa` from state.
+   - If empty, immediately returns empty task sets with a zeroed summary.
+   - Invokes `self.chain.invoke({"qa_json": json.dumps(raw_qa, indent=2)})`.
+   - The LLM partitions each Q&A pair into either `reasoning_agent` or `cognitive_agent` based on cognitive evaluation criteria.
+   - Directly tallies and computes the task distribution summary:
+     - `total_tasks`: Total routed Q&A pairs.
+     - `reasoning_tasks_count`: Number of tasks assigned to Reasoning Agent.
+     - `cognitive_tasks_count`: Number of tasks assigned to Cognitive Agent.
+   - Returns `reasoning_agent`, `cognitive_agent`, and `summary` into the state.
+   - Transitions directly from `"classify"` to `END`.
+
+5. **Persistence & Handoff (`run` in `ao_pipeline.py`)**:
+   - Extracts `reasoning_agent` and `cognitive_agent` mappings from the graph output.
+   - Writes the partitioned tasks directly to `routed_tasks.json` as the input bridge for `ReasoningAgent` and `CognitiveAgent`.
+   - Returns the complete result dictionary.
+
+```
+[run() entry] ──► Load "qa_transcript.json"
+       │
+       ▼
+[OrchestratorAgent.orchestrate()]
+       │
+       ▼
+┌────────────────────────────────────────────────────────┐
+│ LangGraph State Machine (OrchestratorState)            │
+│                                                        │
+│  START ──► [classify] ──► END                          │
+│                 │                                      │
+│                 ├─► LCEL Chain Invocation              │
+│                 │   (PromptTemplate | LLM | Parser)    │
+│                 │                                      │
+│                 └─► Partition & Compute Summary:       │
+│                     - reasoning_agent: Dict[str, str]  │
+│                     - cognitive_agent: Dict[str, str]  │
+│                     - summary: Task Counts             │
+└─────────────────────────┬──────────────────────────────┘
+                          │
+                          ▼
+         Export partitions to "routed_tasks.json"
+                          │
+                          ▼
+                    Return Result
+```
+
+---
+
+### 2. File & Component Breakdown (with LangChain & LangGraph Components)
+
+#### A. `orchestrator.py`
+**Purpose**: Houses the output schemas, LCEL classification chain, and compiled LangGraph state graph for Q&A task categorization and routing.
+
+- **Classes & Schemas**:
+  - `OrchestratorOutput(BaseModel)`:
+    - *Purpose*: Pydantic schema enforcing structured allocation of Q&A pairs into `reasoning_agent` and `cognitive_agent` dictionaries.
+    - *LangChain Component*: **`PydanticOutputParser`**
+      - *Where used*: `self.parser = PydanticOutputParser(pydantic_object=OrchestratorOutput)`, chained into `self.chain`.
+      - *Why used*: Guarantees that the LLM returns strict, valid JSON conforming to `{ "reasoning_agent": {...}, "cognitive_agent": {...} }`.
+  - `OrchestratorState(TypedDict)`:
+    - *Purpose*: State schema tracking `raw_qa`, `reasoning_agent`, `cognitive_agent`, and `summary`.
+    - *LangGraph Component*: **`StateGraph(OrchestratorState)`**
+      - *Where used*: Passed to `StateGraph` in `_build_graph()`.
+      - *Why used*: Defines the strongly typed state schema for channels propagated across LangGraph execution steps.
+
+- **Methods**:
+  - `__init__(llm=None)`:
+    - *Purpose*: Configures LLM, output parser, builds the LCEL chain, and compiles the LangGraph workflow.
+    - *Where called*: By `run()` in `ao_pipeline.py`.
+
+  - `_build_chain()`:
+    - *Purpose*: Assembles the prompt template and binds it to the LLM and output parser.
+    - *Where called*: Automatically inside `__init__`.
+    - *LangChain Components Used*:
+      - **`PromptTemplate`** (`langchain_core.prompts`):
+        - *Where used*: Formulates the prompt with `qa_json` and `format_instructions`.
+        - *Why used*: Injects the raw Q&A JSON transcript and formatting constraints cleanly into the prompt context.
+      - **LCEL Pipe Operator (`|`)**:
+        - *Where used*: `self.chain = prompt | self.llm | self.parser`.
+        - *Why used*: Creates an atomic runnable pipeline that takes input variables, executes model inference, and parses the output into a validated Pydantic model.
+
+  - `_classify_node(state: OrchestratorState) -> Dict[str, Any]`:
+    - *Purpose*: Consolidated graph node that executes classification via `self.chain.invoke(...)`, counts assigned tasks, and computes summary statistics.
+    - *Where called*: Executed by the LangGraph runtime for the `"classify"` node.
+    - *LangGraph Component*: **Graph Node Function (`workflow.add_node`)**
+      - *Where used*: Bound via `workflow.add_node("classify", self._classify_node)`.
+      - *Why used*: Encapsulates LLM partitioning and count tallying within a single deterministic graph node.
+
+  - `_build_graph()`:
+    - *Purpose*: Constructs and compiles the LangGraph state machine.
+    - *Where called*: Automatically inside `__init__`.
+    - *LangGraph Components Used*:
+      - **`StateGraph`** (`langgraph.graph`):
+        - *Where used*: `workflow = StateGraph(OrchestratorState)`.
+        - *Why used*: Provides the graph-based state orchestration engine to manage data flow.
+      - **`START` & `END`** (`langgraph.graph`):
+        - *Where used*: `workflow.add_edge(START, "classify")` and `workflow.add_edge("classify", END)`.
+        - *Why used*: LangGraph sentinel nodes that mark workflow entry and completion.
+      - **`workflow.compile()`**:
+        - *Where used*: `self.graph = workflow.compile()`.
+        - *Why used*: Compiles the state graph definition into an invocable `CompiledStateGraph` runnable.
+
+  - `orchestrate(raw_qa: Dict[str, str]) -> Dict[str, Any]`:
+    - *Purpose*: Public API method executing the compiled state machine with input Q&A transcript.
+    - *Where called*: By `run()` in `ao_pipeline.py`.
+
+---
+
+#### B. `ao_pipeline.py`
+**Purpose**: Pipeline execution entry point coordinating transcript loading, orchestrator execution, and task file export.
+
+- **Functions**:
+  - `run(transcript_path="qa_transcript.json", output_filepath="routed_tasks.json") -> Dict[str, Any]`:
+    - *Purpose*: Single consolidated function running orchestrator operations in orderly sequence: loading input, instantiating `OrchestratorAgent`, invoking `orchestrate()`, saving partitions to `routed_tasks.json`, and returning the final state.
+    - *Where called*: When running `python ao_pipeline.py` or imported as the orchestration stage in higher-level pipelines.
+
