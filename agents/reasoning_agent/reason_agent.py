@@ -6,7 +6,7 @@ from langchain_core.prompts import PromptTemplate
 try:
     from agents.questioner.models import get_hf_llm
 except ModuleNotFoundError:
-    from agents.questioner.models import get_hf_llm
+    from questioner.models import get_hf_llm
 
 
 class ReasoningAgent:

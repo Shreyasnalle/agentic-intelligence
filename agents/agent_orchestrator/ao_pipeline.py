@@ -6,7 +6,7 @@ from langgraph.graph import END, START, StateGraph
 try:
     from agents.reasoning_agent.reason_agent import ReasoningAgent
 except ModuleNotFoundError:
-    from agents.reasoning_agent.reason_agent import ReasoningAgent
+    from reasoning_agent.reason_agent import ReasoningAgent
 
 
 class OrchestratorState(TypedDict, total=False):
