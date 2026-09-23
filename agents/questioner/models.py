@@ -5,7 +5,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 LLAMA_MODEL_ID = "meta-llama/Llama-3.1-8B-Instruct"
-DEEPSEEK_REASONING_MODEL_ID = "deepseek-ai/DeepSeek-R1-Distill-Qwen-7B"
+
 
 def get_hf_llm(
     repo_id: Optional[str] = None,
