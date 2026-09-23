@@ -11,7 +11,7 @@ def get_hf_llm(
     max_new_tokens: int = 512,
 ) -> Optional[Any]:
     token = api_token or os.getenv("HUGGINGFACEHUB_API_TOKEN")
-    model_id = repo_id or os.getenv("HF_MODEL_NAME") or "meta-llama/Llama-3.1-8B-Instruct"
+    model_id = repo_id or os.getenv("HF_MODEL_NAME") or "deepseek-ai/DeepSeek-R1-Distill-Qwen-8B"
 
     if not token:
         return None
