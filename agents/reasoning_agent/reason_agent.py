@@ -4,16 +4,16 @@ from langchain_core.output_parsers import StrOutputParser
 from langchain_core.prompts import PromptTemplate
 
 try:
-    from agents.questioner.models import get_hf_llm
+    from agents.questioner.models import DEEPSEEK_REASONING_MODEL_ID, get_hf_llm
 except ModuleNotFoundError:
-    from questioner.models import get_hf_llm
+    from questioner.models import DEEPSEEK_REASONING_MODEL_ID, get_hf_llm
 
 
 class ReasoningAgent:
     """Evaluates logical reasoning and problem-solving from orchestrator-routed Q&A pairs."""
 
     def __init__(self, llm: Optional[Any] = None):
-        self.llm = llm or get_hf_llm()
+        self.llm = llm or get_hf_llm(repo_id=DEEPSEEK_REASONING_MODEL_ID)
         self.parser = StrOutputParser()
         self.prompt = PromptTemplate(
             input_variables=["qa_block"],

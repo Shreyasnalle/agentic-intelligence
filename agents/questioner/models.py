@@ -4,6 +4,9 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
+LLAMA_MODEL_ID = "meta-llama/Llama-3.1-8B-Instruct"
+DEEPSEEK_REASONING_MODEL_ID = "deepseek-ai/DeepSeek-R1-Distill-Qwen-8B"
+
 def get_hf_llm(
     repo_id: Optional[str] = None,
     api_token: Optional[str] = None,
@@ -11,7 +14,7 @@ def get_hf_llm(
     max_new_tokens: int = 512,
 ) -> Optional[Any]:
     token = api_token or os.getenv("HUGGINGFACEHUB_API_TOKEN")
-    model_id = repo_id or os.getenv("HF_MODEL_NAME") or "deepseek-ai/DeepSeek-R1-Distill-Qwen-8B"
+    model_id = repo_id or os.getenv("HF_MODEL_NAME") or LLAMA_MODEL_ID
 
     if not token:
         return None
