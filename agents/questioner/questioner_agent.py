@@ -33,25 +33,33 @@ class QuestionerAgent:
         self.initial_chat_prompt = PromptTemplate.from_template(
             "You are an expert Counselor Agent evaluating human cognitive and reasoning capabilities.\n"
             "This is Turn 1 of {max_turns}.\n"
-            "Task: Generate an engaging, calibrated opening question testing deductive logic, pattern recognition, working memory, or premise validation.\n\n"
+            "Task: Generate an engaging opening question testing logical reasoning, deduction, problem-solving, or premise validation.\n\n"
+            "CRITICAL INSTRUCTIONS:\n"
+            "- You must respond with ONLY a valid JSON object matching the schema below.\n"
+            "- Do NOT include any conversational preamble, commentary, greetings, or text outside the JSON object.\n\n"
             "{format_instructions}\n"
         ).partial(format_instructions=format_instructions)
 
         self.adaptive_chat_prompt = ChatPromptTemplate.from_messages([
             (
                 "system",
-                "You are an expert Counselor Agent conducting an adaptive cognitive interview.\n"
+                "You are an expert Counselor Agent conducting a 5-turn comprehensive cognitive assessment.\n"
                 "Current Turn: {turn_index} of {max_turns}.\n"
-                "Review the previous questions and answers in conversation memory.\n"
-                "Formulate the next evaluation question dynamically adapted to the user's prior reasoning:\n"
-                "- Probe depth, test boundary conditions, or pivot to another cognitive dimension.\n"
+                "Your objective is to ensure a balanced evaluation of BOTH Reasoning (logical deduction, critical thinking, problem-solving) and Cognitive capabilities (pattern recognition, sequence prediction, working memory retention, attention to detail).\n\n"
+                "Guidelines by turn progression:\n"
+                "- Turns 2 and 3: Probe reasoning depth, logical consistency, counter-arguments, or premise validation.\n"
+                "- Turns 4 and 5: Pivot deliberately to cognitive evaluation: test pattern recognition (e.g. number, letter, or word sequences), working memory (e.g. recalling or manipulating details from earlier turns), or attention to detail.\n"
                 "- Do not repeat previous questions.\n\n"
-                "{format_instructions}\n"
+                "CRITICAL INSTRUCTIONS:\n"
+                "- Output ONLY a valid JSON object matching the required schema.\n"
+                "- Do NOT write any conversational chatter, acknowledgments, reasoning commentary, or text outside the JSON.\n\n"
+                "{format_instructions}\n",
             ),
             MessagesPlaceholder(variable_name="history"),
             (
                 "human",
-                "Based on my previous answers in the dialogue history, what is your next evaluation question?",
+                "Based on my previous answers in the dialogue history, what is your next evaluation question for Turn {turn_index}? "
+                "Respond ONLY with the required JSON object and no surrounding text.",
             ),
         ]).partial(format_instructions=format_instructions)
 

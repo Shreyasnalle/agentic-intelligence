@@ -35,7 +35,8 @@ class CognitiveAgent:
         self.prompt = PromptTemplate(
             template=(
                 "You are an expert Cognitive Analyst evaluating human cognitive capabilities.\n"
-                "Analyze the following assigned cognitive question-and-answer pairs to evaluate pattern recognition ability, working memory retention and tracking, attention to detail, and overall cognitive assessment.\n\n"
+                "Analyze ONLY the following assigned cognitive question-and-answer pairs to evaluate pattern recognition ability, working memory retention and tracking, attention to detail, and overall cognitive assessment.\n\n"
+                "CRITICAL: Base your evaluation strictly on the questions and answers provided in Assigned Cognitive Tasks below. Do NOT invent, hallucinate, or assume any external questions or answers.\n\n"
                 "Assigned Cognitive Tasks:\n{tasks}\n\n"
                 "Return ONLY a valid JSON object without any markdown headers, conversational text, or explanations outside the JSON. Ensure 'qna' is a JSON object dictionary, not a list.\n\n"
                 "{format_instructions}\n"
@@ -47,11 +48,17 @@ class CognitiveAgent:
 
     # Analyzes assigned cognitive Q&A pairs and returns structured evaluation
     def analyze_cognitive(self, tasks: Dict[str, str]) -> Dict[str, Any]:
+        if not tasks:
+            return {
+                "qna": {},
+                "cognitive_result": "No cognitive-specific evaluation tasks were routed for this session.",
+            }
+
         parsed: CognitiveAnalysisOutput = self.chain.invoke({
             "tasks": json.dumps(tasks, indent=2),
         })
 
         return {
-            "qna": parsed.qna,
+            "qna": tasks,
             "cognitive_result": parsed.cognitive_result,
         }

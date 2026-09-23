@@ -35,7 +35,8 @@ class ReasoningAgent:
         self.prompt = PromptTemplate(
             template=(
                 "You are an expert Reasoning Analyst evaluating human cognitive and logical capabilities.\n"
-                "Analyze the following assigned reasoning question-and-answer pairs to evaluate logical reasoning quality, problem-solving approach, error patterns, and overall assessment.\n\n"
+                "Analyze ONLY the following assigned reasoning question-and-answer pairs to evaluate logical reasoning quality, problem-solving approach, error patterns, and overall assessment.\n\n"
+                "CRITICAL: Base your evaluation strictly on the questions and answers provided in Assigned Reasoning Tasks below. Do NOT invent, hallucinate, or assume any external questions or answers.\n\n"
                 "Assigned Reasoning Tasks:\n{tasks}\n\n"
                 "Return ONLY a valid JSON object without any markdown headers, conversational text, or explanations outside the JSON. Ensure 'qna' is a JSON object dictionary, not a list.\n\n"
                 "{format_instructions}\n"
@@ -47,11 +48,17 @@ class ReasoningAgent:
 
     # Analyzes assigned reasoning Q&A pairs and returns structured evaluation
     def analyze_reasoning(self, tasks: Dict[str, str]) -> Dict[str, Any]:
+        if not tasks:
+            return {
+                "qna": {},
+                "reasoning_result": "No reasoning-specific evaluation tasks were routed for this session.",
+            }
+
         parsed: ReasoningAnalysisOutput = self.chain.invoke({
             "tasks": json.dumps(tasks, indent=2),
         })
 
         return {
-            "qna": parsed.qna,
+            "qna": tasks,
             "reasoning_result": parsed.reasoning_result,
         }

@@ -1,0 +1,17 @@
+{
+  "reasoning_agent": {
+    "qna": {
+      "A bat and a ball together cost $1.10. The bat costs $1.00 more than the ball. How much does the ball cost?": "0.10",
+      "A woman has two coins that add up to 30 cents. One coin is not a nickel. What are the two coins?": "copper",
+      "A snail is at the bottom of a 20-foot well. Each day, it climbs up 3 feet, but at night it slips back 2 feet. How many days will it take for the snail to reach the top of the well?": "25",
+      "What is the next letter in the sequence: A, C, E, G, ?": "I"
+    },
+    "reasoning_result": "The analysis reveals a mixed bag of logical reasoning quality, problem-solving approach, error patterns, and overall assessment. Questions 1 and 4 demonstrate strong logical reasoning skills with correct answers. However, questions 2 and 3 show a lack of critical thinking, with question 2's answer being a vague description rather than a specific coin, and question 3's answer being a simple numerical value without a clear explanation of the calculation. Overall, the reasoning quality is inconsistent, and the problem-solving approach could benefit from more explicit and detailed thought processes."
+  },
+  "cognitive_agent": {
+    "qna": {
+      "List the first 5 numbers that appear in the sequence: 2, 7, 12, 18, 25, ?": "2 7 12 18 25"
+    },
+    "cognitive_result": "This respondent demonstrated some difficulty with pattern recognition and working memory, but showed good attention to detail. Their overall cognitive assessment is below average."
+  }
+}
