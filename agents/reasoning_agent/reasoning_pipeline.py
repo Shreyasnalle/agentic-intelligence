@@ -1,52 +1,62 @@
 import json
 from pathlib import Path
 from typing import Dict, Any, Union
-from langchain_core.runnables import RunnableLambda
 
 try:
     from agents.reasoning_agent.reason_agent import ReasoningAgent
 except ModuleNotFoundError:
-    from reason_agent import ReasoningAgent
+    import sys
+    sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
+    from agents.reasoning_agent.reason_agent import ReasoningAgent
 
 
-# Loads reasoning Q&A pairs from JSON file path or dictionary
-def load_reasoning_input(source: Union[str, Dict[str, str]]) -> Dict[str, str]:
+# Loads reasoning tasks dictionary from routed_tasks.json or input dictionary
+def load_reasoning_input(source: Union[str, Dict[str, Any]] = "routed_tasks.json") -> Dict[str, str]:
     if isinstance(source, dict):
         return source.get("reasoning_agent", source)
 
-    path = Path(source)
-    if not path.exists():
-        # Fallback to routed_tasks.json if source path not found
-        alt_path = Path("routed_tasks.json")
-        if alt_path.exists():
-            path = alt_path
-        else:
-            raise FileNotFoundError(f"Reasoning input file not found at: {source}")
-
-    with open(path, "r", encoding="utf-8") as file:
+    with open(source, "r", encoding="utf-8") as file:
         data = json.load(file)
 
-    if isinstance(data, dict) and "reasoning_agent" in data and isinstance(data["reasoning_agent"], dict):
-        return data["reasoning_agent"]
-
-    return data
+    return data.get("reasoning_agent", {})
 
 
-# Runs reasoning evaluation pipeline using LCEL runnable chain
+# Saves the reasoning analysis results to agents_analysis.json
+def save_agents_analysis(
+    analysis_data: Dict[str, Any],
+    output_filepath: str = "agents_analysis.json",
+) -> None:
+    output = {}
+    path = Path(output_filepath)
+    if path.exists():
+        try:
+            with open(path, "r", encoding="utf-8") as file:
+                output = json.load(file)
+        except Exception:
+            output = {}
+
+    output["reasoning_agent"] = analysis_data
+
+    with open(output_filepath, "w", encoding="utf-8") as file:
+        json.dump(output, file, indent=2, ensure_ascii=False)
+
+
+create_agents_analysis_json = save_agents_analysis
+
+
+# Runs reasoning evaluation pipeline and saves output to agents_analysis.json
 def run_reasoning_pipeline(
-    reasoning_qa_json: Union[str, Dict[str, str]] = "routed_tasks.json",
+    source: Union[str, Dict[str, Any]] = "routed_tasks.json",
+    output_filepath: str = "agents_analysis.json",
 ) -> Dict[str, Any]:
+    reasoning_tasks = load_reasoning_input(source)
     reasoning_agent = ReasoningAgent()
+    analysis = reasoning_agent.analyze_reasoning(reasoning_tasks)
+    save_agents_analysis(analysis, output_filepath)
+    return analysis
 
-    pipeline_chain = (
-        RunnableLambda(load_reasoning_input)
-        | RunnableLambda(lambda qa: {
-            "routed_reasoning_questions": len(qa),
-            "analysis": reasoning_agent.analyze_reasoning(qa),
-        })
-    )
 
-    return pipeline_chain.invoke(reasoning_qa_json)
+run = run_reasoning_pipeline
 
 
 if __name__ == "__main__":
