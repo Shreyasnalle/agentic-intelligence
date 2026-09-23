@@ -1,44 +1,57 @@
 import json
 from typing import Any, Dict, Optional
+from pydantic import BaseModel, Field
 
-from langchain_core.output_parsers import StrOutputParser
+from langchain_core.output_parsers import PydanticOutputParser
 from langchain_core.prompts import PromptTemplate
 
 try:
-    from agents.questioner.models import DEEPSEEK_REASONING_MODEL_ID, get_hf_llm
+    from agents.questioner.models import get_hf_llm
 except ModuleNotFoundError:
-    from questioner.models import DEEPSEEK_REASONING_MODEL_ID, get_hf_llm
+    import sys
+    from pathlib import Path
+    sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
+    from agents.questioner.models import get_hf_llm
 
 
+# Output schema for cognitive evaluation
+class CognitiveAnalysisOutput(BaseModel):
+    qna: Dict[str, Any] = Field(
+        default_factory=dict,
+        description="The cognitive question-and-answer pairs analyzed as a JSON object dictionary. Format: {\"question\": \"answer\"}.",
+    )
+    cognitive_result: str = Field(
+        description="A comprehensive evaluation text string covering pattern recognition ability, working memory retention and tracking, attention to detail, and overall cognitive assessment.",
+    )
+
+
+# Evaluates attention, memory, and pattern-related capabilities from orchestrator-routed tasks
 class CognitiveAgent:
-    """Evaluates attention, memory, and pattern-related capabilities from orchestrator-routed Q&A pairs."""
-
+    # Initializes cognitive agent, Pydantic output parser, prompt, and LLM chain
     def __init__(self, llm: Optional[Any] = None):
-        self.llm = llm or get_hf_llm(repo_id=DEEPSEEK_REASONING_MODEL_ID, max_new_tokens=1536) or get_hf_llm(max_new_tokens=1536)
-        self.parser = StrOutputParser()
+        self.llm = llm or get_hf_llm(max_new_tokens=1536)
+        self.parser = PydanticOutputParser(pydantic_object=CognitiveAnalysisOutput)
+        format_instructions = self.parser.get_format_instructions()
         self.prompt = PromptTemplate(
-            input_variables=["qa_json"],
             template=(
-                "You are a Cognitive Analyst Agent.\n"
-                "Analyze ONLY the user question-answer pairs provided below (already routed by the orchestrator).\n"
-                "Your task is to evaluate the user's attention, memory, and pattern-related responses.\n\n"
-                "Return a concise analysis with:\n"
-                "1) Pattern recognition ability\n"
-                "2) Working memory retention & tracking\n"
-                "3) Attention to operational details\n"
-                "4) Overall cognitive assessment\n\n"
-                "Question-Answer Pairs (JSON):\n{qa_json}\n"
+                "You are an expert Cognitive Analyst evaluating human cognitive capabilities.\n"
+                "Analyze the following assigned cognitive question-and-answer pairs to evaluate pattern recognition ability, working memory retention and tracking, attention to detail, and overall cognitive assessment.\n\n"
+                "Assigned Cognitive Tasks:\n{tasks}\n\n"
+                "Return ONLY a valid JSON object without any markdown headers, conversational text, or explanations outside the JSON. Ensure 'qna' is a JSON object dictionary, not a list.\n\n"
+                "{format_instructions}\n"
             ),
+            input_variables=["tasks"],
+            partial_variables={"format_instructions": format_instructions},
         )
-        self.chain = None
-        if self.llm is not None:
-            self.chain = self.prompt | self.llm | self.parser
+        self.chain = self.prompt | self.llm | self.parser
 
-    def analyze_cognitive(self, qa_pairs: Dict[str, str]) -> str:
-        if not qa_pairs:
-            return "No routed cognitive Q&A pairs were provided for analysis."
+    # Analyzes assigned cognitive Q&A pairs and returns structured evaluation
+    def analyze_cognitive(self, tasks: Dict[str, str]) -> Dict[str, Any]:
+        parsed: CognitiveAnalysisOutput = self.chain.invoke({
+            "tasks": json.dumps(tasks, indent=2),
+        })
 
-        if self.chain is None:
-            raise RuntimeError("Model or chain is not initialized.")
-
-        return self.chain.invoke({"qa_json": json.dumps(qa_pairs, indent=2)}).strip()
+        return {
+            "qna": parsed.qna,
+            "cognitive_result": parsed.cognitive_result,
+        }

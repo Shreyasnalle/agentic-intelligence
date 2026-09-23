@@ -23,5 +23,13 @@
       }
     },
     "reasoning_result": "Both tasks demonstrate poor logical reasoning quality, inadequate problem-solving approaches, and flawed error patterns. The overall assessment is that the provided answers are incorrect and do not demonstrate a clear understanding of the problems."
+  },
+  "cognitive_agent": {
+    "qna": {
+      "q1": "A",
+      "q2": "B",
+      "q3": "C"
+    },
+    "cognitive_result": "The subject demonstrated strong pattern recognition ability, with correct answers to all questions. Working memory retention and tracking was also excellent, with no signs of cognitive fatigue. Attention to detail was evident, as the subject accurately answered each question. Overall, the subject's cognitive abilities were well above average."
   }
 }

@@ -1,51 +1,62 @@
 import json
 from pathlib import Path
 from typing import Dict, Any, Union
-from langchain_core.runnables import RunnableLambda
 
 try:
     from agents.cognitive_agent.cognitive_agent import CognitiveAgent
 except ModuleNotFoundError:
-    from cognitive_agent import CognitiveAgent
+    import sys
+    sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
+    from agents.cognitive_agent.cognitive_agent import CognitiveAgent
 
 
-# Loads cognitive Q&A pairs from JSON file path or dictionary
-def load_cognitive_input(source: Union[str, Dict[str, str]]) -> Dict[str, str]:
+# Loads cognitive tasks dictionary from routed_tasks.json or input dictionary
+def load_cognitive_input(source: Union[str, Dict[str, Any]] = "routed_tasks.json") -> Dict[str, str]:
     if isinstance(source, dict):
         return source.get("cognitive_agent", source)
 
-    path = Path(source)
-    if not path.exists():
-        alt_path = Path("routed_tasks.json")
-        if alt_path.exists():
-            path = alt_path
-        else:
-            raise FileNotFoundError(f"Cognitive input file not found at: {source}")
-
-    with open(path, "r", encoding="utf-8") as file:
+    with open(source, "r", encoding="utf-8") as file:
         data = json.load(file)
 
-    if isinstance(data, dict) and "cognitive_agent" in data and isinstance(data["cognitive_agent"], dict):
-        return data["cognitive_agent"]
-
-    return data
+    return data.get("cognitive_agent", {})
 
 
-# Runs cognitive evaluation pipeline using LCEL runnable chain
+# Saves the cognitive analysis results to agents_analysis.json
+def save_agents_analysis(
+    analysis_data: Dict[str, Any],
+    output_filepath: str = "agents_analysis.json",
+) -> None:
+    output = {}
+    path = Path(output_filepath)
+    if path.exists():
+        try:
+            with open(path, "r", encoding="utf-8") as file:
+                output = json.load(file)
+        except Exception:
+            output = {}
+
+    output["cognitive_agent"] = analysis_data
+
+    with open(output_filepath, "w", encoding="utf-8") as file:
+        json.dump(output, file, indent=2, ensure_ascii=False)
+
+
+create_agents_analysis_json = save_agents_analysis
+
+
+# Runs cognitive evaluation pipeline and saves output to agents_analysis.json
 def run_cognitive_pipeline(
-    cognitive_qa_json: Union[str, Dict[str, str]] = "routed_tasks.json",
+    source: Union[str, Dict[str, Any]] = "routed_tasks.json",
+    output_filepath: str = "agents_analysis.json",
 ) -> Dict[str, Any]:
+    cognitive_tasks = load_cognitive_input(source)
     cognitive_agent = CognitiveAgent()
+    analysis = cognitive_agent.analyze_cognitive(cognitive_tasks)
+    save_agents_analysis(analysis, output_filepath)
+    return analysis
 
-    pipeline_chain = (
-        RunnableLambda(load_cognitive_input)
-        | RunnableLambda(lambda qa: {
-            "routed_cognitive_questions": len(qa),
-            "analysis": cognitive_agent.analyze_cognitive(qa),
-        })
-    )
 
-    return pipeline_chain.invoke(cognitive_qa_json)
+run = run_cognitive_pipeline
 
 
 if __name__ == "__main__":
